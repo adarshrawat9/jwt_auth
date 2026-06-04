@@ -13,9 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/v2/bson"
+    "go.mongodb.org/mongo-driver/v2/mongo"
+    
+
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -38,8 +39,10 @@ func VerifyPassword(userPassword string, providedPassword string)(bool, string){
 	msg := ""
 
 	if err != nil{
-		msg = fmt.Sprintf("email of pa")
+		msg = fmt.Sprintf("email or password is incorrect")
+		check = false
 	}
+	return check, msg
 
 }
 
@@ -125,7 +128,7 @@ func Signup()gin.HandlerFunc{
 
 		user.Created_At, _ = time.Parse(time.RFC3339 , time.Now().Format(time.RFC3339))
 		user.Updated_At, _ = time.Parse(time.RFC3339 , time.Now().Format(time.RFC3339))
-		user.ID = primitive.NewObjectID()
+		user.ID = bson.NewObjectID()
 		user.User_Id =  user.ID.Hex()
 		token, refreshToken, _ := helper.GenerateAllTokens(*user.Email , *user.First_Name, *user.Last_Name,*user.User_Type, user.User_Id)
 		user.Token = &token
@@ -145,13 +148,13 @@ func Signup()gin.HandlerFunc{
 
 func GetUsers()gin.HandlerFunc{
 	return func (c *gin.Context){
-		helper.CheckUserType(c, "ADMIN"); err != nil{
+		if err := helper.CheckUserType(c, "ADMIN"); err != nil{
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 
-		recordPerPage, er := strconv.Atoi(c.Query("recordPerPage"))
+		recordPerPage, err := strconv.Atoi(c.Query("recordPerPage"))
 		if err != nil || recordPerPage < 1{
 			recordPerPage = 10
 		}
@@ -163,23 +166,37 @@ func GetUsers()gin.HandlerFunc{
 		startIndex := (page - 1)* recordPerPage
 		startIndex, err = strconv.Atoi(c.Query("startIndex"))
 
-		matchStage := bson.D{{"$match", bson.D{{}}}}
-		groupStage := bson.D{{"$group", bson.D{{"_id", "null"}}, {"total_count",bson.D{{"$sum", 1}}}, {"data", bson.D{{"$push", "$$Route"}}}}}
-		projectStage := bson.D{
-			{"$project", bson.D{
-				{"_id", 0},
-				{"total_count", 1},
-				{"user_items", bson.D{{"$slice", []interface{}{"$data", startIndex, recordPerPage}}}},
-			}}
+		matchStage := bson.D{{Key: "$match", Value: bson.D{}}}
 
-		}
+		groupStage := bson.D{{
+			Key: "$group",
+			Value: bson.D{
+				{Key: "_id", Value: "null"},
+				{Key: "total_count", Value: bson.D{{Key: "$sum", Value: 1}}},
+				{Key: "data", Value: bson.D{{Key: "$push", Value: "$$ROOT"}}},
+			},
+		}}
+
+		projectStage := bson.D{{
+			Key: "$project",
+			Value: bson.D{
+				{Key: "_id", Value: 0},
+				{Key: "total_count", Value: 1},
+				{Key: "user_items", Value: bson.D{{
+					Key:   "$slice",
+					Value: []interface{}{"$data", startIndex, recordPerPage},
+				}}},
+			},
+		}}
+	
 
 		result, err := userCollection.Aggregate(ctx, mongo.Pipeline{
-			matchStage, groupStage, projectStage
+			matchStage, groupStage, projectStage,
 		})
 		defer cancel()
 		if err != nil{
-			c.JSON{http.StatusInternalServerError, gin.H{"error":"error occured whilelisting user items"}}
+			c.JSON(http.StatusInternalServerError, gin.H{"error":"error occured whilelisting user items"})
+			return 
 
 		}
 		var allUsers []bson.M
@@ -187,10 +204,6 @@ func GetUsers()gin.HandlerFunc{
 			log.Fatal(err)
 		}
 		c.JSON(http.StatusOK, allUsers[0])
-
-
-	
-		
 	}
 }
 
