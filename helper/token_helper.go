@@ -2,11 +2,11 @@ package helper
 
 import (
 	"context"
-	"fmt"
 	"jwt-auth/database"
 	"log"
 	"os"
 	"time"
+	"errors"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -98,7 +98,7 @@ func UpdateAllToken(signedToken string, signedRefreshToken string, userId string
 }
 
 
-func ValidateToken(signedToken string)(claims *SignedDetail, msg string){
+func ValidateToken(signedToken string)(claims *SignedDetail,msg error){
 	token , err := jwt.ParseWithClaims(
 		signedToken,
 		&SignedDetail{},
@@ -109,18 +109,18 @@ func ValidateToken(signedToken string)(claims *SignedDetail, msg string){
 
 	)
 	if err != nil{
-		msg = err.Error()
+		msg = err
 		return
 	}
 
 	claims , ok := token.Claims.(*SignedDetail)
 	if !ok{
-		msg = fmt.Sprintf("the token is invalid")
+		msg = errors.New("the token provided is invalid")
 		return
 	}
 
 	if claims.ExpiresAt.Before(time.Now()){
-		msg = fmt.Sprintf("token is expired")
+		msg = errors.New("token is expired")
 		return
 	}
 
