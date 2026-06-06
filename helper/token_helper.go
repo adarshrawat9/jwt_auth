@@ -21,15 +21,14 @@ type SignedDetail struct{
 	First_Name       string     
 	Last_Name        string    
 	Uid              string
-	User_type        string  
-	ExpiresAt        time.Time 
+	User_type        string   
 	jwt.RegisteredClaims
 }
 
 
 var userCollection *mongo.Collection = database.OpenCollection(database.Client, "user")
 
-var SECRETE_KEY string = os.Getenv("SECRET_KEY")
+var SECRET_KEY string = os.Getenv("SECRET_KEY")
 
 
 func GenerateAllTokens(email string, firstName string, lastName string, userType string, uid string)(signedToken string, signedRefreshToken string , err error){
@@ -50,12 +49,14 @@ func GenerateAllTokens(email string, firstName string, lastName string, userType
 		},
 	}
 
-	token , err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(SECRETE_KEY))
-	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString([]byte(SECRETE_KEY))
+	token , err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(SECRET_KEY))
+	if err != nil{
+		return "", "" , err
+	}
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims).SignedString([]byte(SECRET_KEY))
 
 	if err != nil{
-		log.Fatal(err)
-		return
+		return "", "" , err
 	}
 
 	return token, refreshToken, err
@@ -103,7 +104,7 @@ func ValidateToken(signedToken string)(claims *SignedDetail,msg error){
 		signedToken,
 		&SignedDetail{},
 		func (token *jwt.Token)(interface{}, error)  {
-			return []byte(SECRETE_KEY), nil
+			return []byte(SECRET_KEY), nil
 			
 		},
 
