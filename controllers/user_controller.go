@@ -24,12 +24,12 @@ import (
 var userCollection *mongo.Collection = database.OpenCollection(database.Client , "user")
 var validate = validator.New()
 
-func HashPassword(password string) string{
+func HashPassword(password string) (string, error){
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
 	if err != nil{
-		log.Fatal(err)
+		return "", err
 	}
-	return string(bytes)
+	return string(bytes), err
 
 }
 
@@ -39,8 +39,7 @@ func VerifyPassword(userPassword string, providedPassword string)(bool, string){
 	msg := ""
 
 	if err != nil{
-		msg = fmt.Sprintf("email or password is incorrect")
-		check = false
+		msg = "email or password is incorrect"
 	}
 	return check, msg
 
@@ -49,6 +48,7 @@ func VerifyPassword(userPassword string, providedPassword string)(bool, string){
 func Signin()gin.HandlerFunc{
 	return func(c *gin.Context){
 		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		defer cancel()
 		var user model.User
 		var foundUser model.User
 
@@ -58,27 +58,36 @@ func Signin()gin.HandlerFunc{
 		}
 
 		err := userCollection.FindOne(ctx, bson.M{"email":user.Email}).Decode(&foundUser)
-		defer cancel()
 		if err != nil{
-			c.JSON(http.StatusInternalServerError, gin.H{"error":"email or passowrd is incorrect"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error":"email or passowrd is incorrect"})
 			return 
 
 		}
 
 		passwordIsValid, msg := VerifyPassword(*user.Password, *foundUser.Password)
-		defer cancel()
-		if passwordIsValid != true{
-			c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		if !passwordIsValid{
+			c.JSON(http.StatusUnauthorized, gin.H{"error": msg})
 			return 
 		}
 
-		if foundUser.Email == nil{
-			c.JSON(http.StatusInternalServerError, gin.H{"error":"user not found"})
-
+		token , refreshToken, err := helper.GenerateAllTokens(*foundUser.Email, *foundUser.First_Name, *foundUser.Last_Name, *foundUser.User_Type, foundUser.User_Id)
+		if err != nil{
+			log.Printf("failed generating tokens : %v" , err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error":"something unexpected occured"})
+			return 
 		}
-		token , refreshToken, err := helper.GenerateAllTokens(*foundUser.Email, *foundUser.First_Name, *foundUser.Last_Name, *foundUser.User_Type, *&foundUser.User_Id)
-		helper.UpdateAllToken(token, refreshToken, foundUser.User_Id)
-		userCollection.FindOne(ctx, bson.M{"userr_id": foundUser.User_Id}).Decode(&foundUser)
+		err = helper.UpdateAllToken(token, refreshToken, foundUser.User_Id)
+		if err != nil{
+			log.Printf("error updating tokens %v", err)
+			c.JSON(http.StatusInternalServerError, "error logging in")
+			return 
+		}
+		err = userCollection.FindOne(ctx, bson.M{"user_id": foundUser.User_Id}).Decode(&foundUser)
+		if err != nil{
+			log.Printf("error getting user from database %v" , err)
+			c.JSON(http.StatusInternalServerError, "error logging in")
+			return 
+		}
 
 		if err != nil{
 			c.JSON(http.StatusInternalServerError, gin.H{"error":err.Error()})
@@ -92,7 +101,8 @@ func Signin()gin.HandlerFunc{
 
 func Signup()gin.HandlerFunc{
 	return func (c *gin.Context)  {
-		var ctx , cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var ctx , cancel = context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
 		var user model.User
 
 		if err := c.BindJSON(&user); err != nil{
@@ -107,16 +117,19 @@ func Signup()gin.HandlerFunc{
 
 		}
 		count, err := userCollection.CountDocuments(ctx , bson.M{"email":user.Email})
-		defer cancel()
 		if err != nil{
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return 
 		}
 
-		password := HashPassword(*user.Password)
+		password, err := HashPassword(*user.Password)
+		if err != nil{
+			log.Printf("error hasing password", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error":"failed to create user"})
+			return 
+		}
 		user.Password = &password
 		count, err = userCollection.CountDocuments(ctx , bson.M{"phone":user.Phone_No})
-		defer cancel()
 		if err != nil{
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while checking for the phone count"})
 			return 
